@@ -21,6 +21,14 @@
 #include <math.h>
 #include <stdbool.h>
 
+void buffer_append_int8(uint8_t* buffer, int8_t number, int32_t *index) {
+        buffer[(*index)++] = number;
+}
+
+void buffer_append_uint8(uint8_t* buffer, uint8_t number, int32_t *index) {
+        buffer[(*index)++] = number;
+}
+
 void buffer_append_int16(uint8_t* buffer, int16_t number, int32_t *index) {
 	buffer[(*index)++] = number >> 8;
 	buffer[(*index)++] = number;

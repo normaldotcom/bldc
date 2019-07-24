@@ -33,6 +33,8 @@
 #include "packet.h"
 #include "hw.h"
 #include "canard_driver.h"
+#include "adaro.h"
+#include "sla_can.h"
 
 // Settings
 #define RX_FRAMES_SIZE	100
@@ -741,15 +743,32 @@ static THD_FUNCTION(cancom_process_thread, arg) {
 			CANRxFrame rxmsg = *rxmsg_tmp;
 
 			if (rxmsg.IDE == CAN_IDE_EXT) {
-				uint8_t id = rxmsg.EID & 0xFF;
-				CAN_PACKET_ID cmd = rxmsg.EID >> 8;
+
+
+				// Group ID
+				uint8_t group_id = (rxmsg.EID & CAN_GROUP_ID_MASK) >> CAN_GROUP_ID_SHIFT;
+
+				// Message Type
+				uint8_t message_type = (rxmsg.EID & CAN_MSG_TYPE_MASK) >> CAN_MSG_TYPE_SHIFT;
+
+				// Device Type
+				uint8_t device_type = (rxmsg.EID & CAN_DEVICE_TYPE_MASK) >> CAN_DEVICE_TYPE_SHIFT;
+
+				// Device ID	
+				uint8_t id = (rxmsg.EID & CAN_DEVICE_ADDRESS_MASK) >> CAN_DEVICE_ADDRESS_SHIFT;
+
+
 				can_status_msg *stat_tmp;
 				can_status_msg_2 *stat_tmp_2;
 				can_status_msg_3 *stat_tmp_3;
 				can_status_msg_4 *stat_tmp_4;
 
-				if (id == 255 || id == app_get_configuration()->controller_id) {
-					switch (cmd) {
+
+
+
+				if (group_id == SLACAN_GROUP_ADARO && device_type == SLACAN_DEVICE_VESC && (id == 255 || id == app_get_configuration()->controller_id)) 
+				{
+					switch (message_type) {
 					case CAN_PACKET_SET_DUTY:
 						ind = 0;
 						mc_interface_set_duty(buffer_get_float32(rxmsg.data8, 1e5, &ind));
@@ -924,7 +943,7 @@ static THD_FUNCTION(cancom_process_thread, arg) {
 							mcconf.l_current_min = min;
 							mcconf.l_current_max = max;
 
-							if (cmd == CAN_PACKET_CONF_STORE_CURRENT_LIMITS) {
+							if (message_type == CAN_PACKET_CONF_STORE_CURRENT_LIMITS) {
 								conf_general_store_mc_configuration(&mcconf);
 							}
 
@@ -943,7 +962,7 @@ static THD_FUNCTION(cancom_process_thread, arg) {
 							mcconf.l_in_current_min = min;
 							mcconf.l_in_current_max = max;
 
-							if (cmd == CAN_PACKET_CONF_STORE_CURRENT_LIMITS_IN) {
+							if (message_type == CAN_PACKET_CONF_STORE_CURRENT_LIMITS_IN) {
 								conf_general_store_mc_configuration(&mcconf);
 							}
 
@@ -963,7 +982,7 @@ static THD_FUNCTION(cancom_process_thread, arg) {
 							mcconf.foc_openloop_rpm = foc_openloop_rpm;
 							mcconf.foc_sl_erpm = foc_sl_erpm;
 
-							if (cmd == CAN_PACKET_CONF_STORE_FOC_ERPMS) {
+							if (message_type == CAN_PACKET_CONF_STORE_FOC_ERPMS) {
 								conf_general_store_mc_configuration(&mcconf);
 							}
 
@@ -976,7 +995,7 @@ static THD_FUNCTION(cancom_process_thread, arg) {
 					}
 				}
 
-				switch (cmd) {
+				switch (message_type) {
 				case CAN_PACKET_STATUS:
 					for (int i = 0;i < CAN_STATUS_MSGS_TO_STORE;i++) {
 						stat_tmp = &stat_msgs[i];
@@ -1056,6 +1075,9 @@ static THD_FUNCTION(cancom_status_thread, arg) {
 		const app_configuration *conf = app_get_configuration();
 
 		if (!conf->uavcan_enable) {
+
+			// Build up sla_can TX ID
+
 			if (conf->send_can_status == CAN_STATUS_1 ||
 					conf->send_can_status == CAN_STATUS_1_2 ||
 					conf->send_can_status == CAN_STATUS_1_2_3 ||
@@ -1065,8 +1087,17 @@ static THD_FUNCTION(cancom_status_thread, arg) {
 				buffer_append_int32(buffer, (int32_t)mc_interface_get_rpm(), &send_index);
 				buffer_append_int16(buffer, (int16_t)(mc_interface_get_tot_current_filtered() * 1e1), &send_index);
 				buffer_append_int16(buffer, (int16_t)(mc_interface_get_duty_cycle_now() * 1e3), &send_index);
-				comm_can_transmit_eid(conf->controller_id |
-						((uint32_t)CAN_PACKET_STATUS << 8), buffer, send_index);
+
+
+				uint32_t txid =  (SLACAN_GROUP_ADARO << CAN_GROUP_ID_SHIFT) |
+								 (SLACAN_MSG_VESC_STATUS_1 << CAN_MSG_TYPE_SHIFT) | 
+								 (SLACAN_DEVICE_VESC << CAN_DEVICE_TYPE_SHIFT) | 
+								 (app_get_configuration()->controller_id << CAN_DEVICE_ADDRESS_SHIFT);
+
+			    comm_can_transmit_eid(txid, buffer, send_index);
+
+				//comm_can_transmit_eid(conf->controller_id |
+			//			((uint32_t)CAN_PACKET_STATUS << 8), buffer, send_index);
 			}
 
 			if (conf->send_can_status == CAN_STATUS_1_2 ||
@@ -1076,8 +1107,17 @@ static THD_FUNCTION(cancom_status_thread, arg) {
 				uint8_t buffer[8];
 				buffer_append_int32(buffer, (int32_t)(mc_interface_get_amp_hours(false) * 1e4), &send_index);
 				buffer_append_int32(buffer, (int32_t)(mc_interface_get_amp_hours_charged(false) * 1e4), &send_index);
-				comm_can_transmit_eid(conf->controller_id |
-						((uint32_t)CAN_PACKET_STATUS_2 << 8), buffer, send_index);
+
+
+				uint32_t txid =  (SLACAN_GROUP_ADARO << CAN_GROUP_ID_SHIFT) |
+								 (SLACAN_MSG_VESC_STATUS_2 << CAN_MSG_TYPE_SHIFT) | 
+								 (SLACAN_DEVICE_VESC << CAN_DEVICE_TYPE_SHIFT) | 
+								 (app_get_configuration()->controller_id << CAN_DEVICE_ADDRESS_SHIFT);
+
+			    comm_can_transmit_eid(txid, buffer, send_index);
+
+				//comm_can_transmit_eid(conf->controller_id |
+			//			((uint32_t)CAN_PACKET_STATUS_2 << 8), buffer, send_index);
 			}
 
 			if (conf->send_can_status == CAN_STATUS_1_2_3 ||
@@ -1086,8 +1126,18 @@ static THD_FUNCTION(cancom_status_thread, arg) {
 				uint8_t buffer[8];
 				buffer_append_int32(buffer, (int32_t)(mc_interface_get_watt_hours(false) * 1e4), &send_index);
 				buffer_append_int32(buffer, (int32_t)(mc_interface_get_watt_hours_charged(false) * 1e4), &send_index);
-				comm_can_transmit_eid(conf->controller_id |
-						((uint32_t)CAN_PACKET_STATUS_3 << 8), buffer, send_index);
+
+				uint32_t txid =  (SLACAN_GROUP_ADARO << CAN_GROUP_ID_SHIFT) |
+								 (SLACAN_MSG_VESC_STATUS_3 << CAN_MSG_TYPE_SHIFT) | 
+								 (SLACAN_DEVICE_VESC << CAN_DEVICE_TYPE_SHIFT) | 
+								 (app_get_configuration()->controller_id << CAN_DEVICE_ADDRESS_SHIFT);
+
+			    comm_can_transmit_eid(txid, buffer, send_index);
+
+
+
+				//comm_can_transmit_eid(conf->controller_id |
+				//		((uint32_t)CAN_PACKET_STATUS_3 << 8), buffer, send_index);
 			}
 
 			if (conf->send_can_status == CAN_STATUS_1_2_3_4) {
@@ -1095,10 +1145,21 @@ static THD_FUNCTION(cancom_status_thread, arg) {
 				uint8_t buffer[8];
 				buffer_append_int16(buffer, (int16_t)(mc_interface_temp_fet_filtered() * 1e1), &send_index);
 				buffer_append_int16(buffer, (int16_t)(mc_interface_temp_motor_filtered() * 1e1), &send_index);
-				buffer_append_int16(buffer, (int16_t)(mc_interface_get_tot_current_in_filtered() * 1e1), &send_index);
-				buffer_append_int16(buffer, (int16_t)(mc_interface_get_pid_pos_now() * 50.0), &send_index);
-				comm_can_transmit_eid(conf->controller_id |
-						((uint32_t)CAN_PACKET_STATUS_4 << 8), buffer, send_index);
+				//buffer_append_int16(buffer, (int16_t)(mc_interface_get_tot_current_in_filtered() * 1e1), &send_index);
+				buffer_append_int16(buffer, (int16_t)(mc_interface_read_reset_avg_input_current() * 1e1), &send_index);
+
+				buffer_append_uint8(buffer, (uint8_t)(mc_interface_get_fault()), &send_index);
+				buffer_append_uint8(buffer, (uint8_t)(mc_interface_get_state()), &send_index);
+
+				uint32_t txid =  (SLACAN_GROUP_ADARO << CAN_GROUP_ID_SHIFT) |
+								 (SLACAN_MSG_VESC_STATUS_4 << CAN_MSG_TYPE_SHIFT) | 
+								 (SLACAN_DEVICE_VESC << CAN_DEVICE_TYPE_SHIFT) | 
+								 (app_get_configuration()->controller_id << CAN_DEVICE_ADDRESS_SHIFT);
+
+			    comm_can_transmit_eid(txid, buffer, send_index);
+
+				//comm_can_transmit_eid(conf->controller_id |
+				//		((uint32_t)CAN_PACKET_STATUS_4 << 8), buffer, send_index);
 			}
 		}
 

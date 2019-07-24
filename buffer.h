@@ -22,6 +22,8 @@
 
 #include <stdint.h>
 
+void buffer_append_int8(uint8_t* buffer, int8_t number, int32_t *index);
+void buffer_append_uint8(uint8_t* buffer, uint8_t number, int32_t *index);
 void buffer_append_int16(uint8_t* buffer, int16_t number, int32_t *index);
 void buffer_append_uint16(uint8_t* buffer, uint16_t number, int32_t *index);
 void buffer_append_int32(uint8_t* buffer, int32_t number, int32_t *index);
